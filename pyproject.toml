@@ -36,10 +36,9 @@ jax = "*"
 jaxlib = "*"
 numpy = "*"
 scipy = "*"
-optax = "*"
 librosa = "*"
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 auraloss = "*"
 torch = "*"
 hypothesis = "*"
