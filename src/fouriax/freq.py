@@ -228,3 +228,44 @@ def multi_resolution_stft_loss(
         return mrstft_loss
     else:
         return mrstft_loss, sc_mag_loss, log_mag_loss, lin_mag_loss, phs_loss
+
+
+def sum_and_difference_stft_loss(
+    inputs,
+    target,
+    fft_sizes=(1024, 2048, 512),
+    hop_sizes=(120, 240, 50),
+    win_lengths=(600, 1200, 240),
+    w_sum=1.0,
+    w_diff=1.0,
+    output="loss",
+    ch_axis=1,
+    **kwargs,
+):
+    assert inputs.shape[ch_axis] == 2
+
+    loss_fn = partial(
+        multi_resolution_stft_loss,
+        fft_sizes=fft_sizes,
+        hop_sizes=hop_sizes,
+        win_lengths=win_lengths,
+        **kwargs,
+    )
+
+    def sd(x):
+        x_sum = jnp.sum(x, axis=ch_axis)
+        x_diff = jnp.diff(x, axis=ch_axis).squeeze(axis=ch_axis)
+        return x_sum, x_diff
+
+    inputs_sum, inputs_diff = sd(inputs)
+    target_sum, target_diff = sd(target)
+
+    sum_loss = loss_fn(inputs_sum, target_sum)
+    diff_loss = loss_fn(inputs_diff, target_diff)
+
+    loss = (sum_loss * w_sum + diff_loss * w_diff) / 2
+
+    if output == "loss":
+        return loss
+    elif output == "full":
+        return loss, sum_loss, diff_loss

@@ -5,11 +5,12 @@
 import jax
 import numpy as np
 import torch
-from auraloss.freq import MultiResolutionSTFTLoss, STFTLoss
+import math
+from auraloss.freq import MultiResolutionSTFTLoss, STFTLoss, SumAndDifferenceSTFTLoss
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from fouriax.freq import multi_resolution_stft_loss, stft_loss
+from fouriax.freq import multi_resolution_stft_loss, stft_loss, sum_and_difference_stft_loss
 
 multi_resolution_stft_loss, stft_loss = jax.jit(
     multi_resolution_stft_loss,
@@ -75,7 +76,7 @@ def generate_sine_wave(draw, length):
 @st.composite
 def generate_complex_signal(draw, shape):
     """Composite strategy to generate a complex signal from multiple sine waves."""
-    length = shape[1]  # Using the second element of shape for signal length
+    length = math.prod(shape)  # Using the second element of shape for signal length
     sine_waves = draw(st.lists(generate_sine_wave(length), min_size=32, max_size=32))
     complex_signal = np.sum(sine_waves, axis=0)
     # Normalize the complex signal to ensure it's within [-1, 1]
@@ -87,7 +88,7 @@ def generate_complex_signal(draw, shape):
 
 # Define the audio strategy
 audio_strategy = generate_complex_signal((1, fs, 1))
-
+stereo_strategy = generate_complex_signal((1, fs, 2))
 
 @settings(deadline=None, max_examples=10)
 @given(
@@ -120,6 +121,35 @@ def test_multi_resolution_stft_loss(inputs, target):
         inputs, target, fft_sizes=fft_sizes, hop_sizes=hop_sizes, win_lengths=win_lengths
     )
     loss_ref = MultiResolutionSTFTLoss(
+        fft_sizes=fft_sizes, hop_sizes=hop_sizes, win_lengths=win_lengths
+    )(
+        torch.from_numpy(np.transpose(inputs, (0, 2, 1))),
+        torch.from_numpy(np.transpose(target, (0, 2, 1))),
+    )
+    assert np.allclose(loss, loss_ref, atol=1.0e-1)
+
+
+@settings(deadline=None, max_examples=10)
+@given(
+    stereo_strategy,
+    stereo_strategy,
+)
+def test_sum_and_difference_stft_loss(inputs, target):
+    """Sample pytest test function with the pytest fixture as an argument."""
+    fft_sizes = (256, 512)
+    hop_sizes = (64, 128)
+    win_lengths = (128, 256)
+
+    loss = sum_and_difference_stft_loss(
+        inputs,
+        target,
+        fft_sizes=fft_sizes,
+        hop_sizes=hop_sizes,
+        win_lengths=win_lengths,
+        output="loss",
+        ch_axis=2,
+    )
+    loss_ref = SumAndDifferenceSTFTLoss(
         fft_sizes=fft_sizes, hop_sizes=hop_sizes, win_lengths=win_lengths
     )(
         torch.from_numpy(np.transpose(inputs, (0, 2, 1))),
