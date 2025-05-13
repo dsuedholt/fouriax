@@ -9,13 +9,15 @@ from auraloss.freq import MultiResolutionSTFTLoss, STFTLoss
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-import fouriax.stft as stft
 from fouriax.freq import multi_resolution_stft_loss, stft_loss
 
 multi_resolution_stft_loss, stft_loss = jax.jit(
     multi_resolution_stft_loss,
     static_argnames=[
-        "untraced_params",
+        "window",
+        "fft_sizes",
+        "hop_sizes",
+        "win_lengths",
         "w_sc",
         "w_log_mag",
         "w_lin_mag",
@@ -30,7 +32,10 @@ multi_resolution_stft_loss, stft_loss = jax.jit(
 ), jax.jit(
     stft_loss,
     static_argnames=[
-        "untraced_params",
+        "window",
+        "fft_size",
+        "hop_size",
+        "win_length",
         "w_sc",
         "w_log_mag",
         "w_lin_mag",
@@ -62,7 +67,7 @@ def generate_sine_wave(draw, length):
     """Composite strategy to generate a single sine wave."""
     amplitude = draw(st.floats(min_value=0.01, max_value=1.0))
     frequency = draw(st.floats(min_value=30.0, max_value=22050.0))
-    t = np.linspace(0, length / fs, int(length), endpoint=False)
+    t = np.linspace(0, length / fs, int(length), endpoint=False, dtype=np.float32)
     sine_wave = amplitude * np.sin(2 * np.pi * frequency * t)
     return sine_wave
 
@@ -92,8 +97,7 @@ audio_strategy = generate_complex_signal((1, fs, 1))
 )
 def test_stft_loss(inputs, target, res):
     """Sample pytest test function with the pytest fixture as an argument."""
-    traced_params, untraced_params = stft.init_stft_params(res, res // 4, res // 2)
-    loss = stft_loss(traced_params, untraced_params, inputs, target)
+    loss = stft_loss(inputs, target, res, res // 4, res // 2)
     loss_ref = STFTLoss(res, res // 4, res // 2)(
         torch.from_numpy(np.transpose(inputs, (0, 2, 1))),
         torch.from_numpy(np.transpose(target, (0, 2, 1))),
@@ -108,16 +112,12 @@ def test_stft_loss(inputs, target, res):
 )
 def test_multi_resolution_stft_loss(inputs, target):
     """Sample pytest test function with the pytest fixture as an argument."""
-    fft_sizes = [256, 512]
-    hop_sizes = [64, 128]
-    win_lengths = [128, 256]
-    params = [
-        stft.init_stft_params(x, y, z)
-        for x, y, z in zip(fft_sizes, hop_sizes, win_lengths)
-    ]
-    traced_params, untraced_params = [[i for i, _ in params], [j for _, j in params]]
+    fft_sizes = (256, 512)
+    hop_sizes = (64, 128)
+    win_lengths = (128, 256)
+
     loss = multi_resolution_stft_loss(
-        traced_params, tuple(untraced_params), inputs, target
+        inputs, target, fft_sizes=fft_sizes, hop_sizes=hop_sizes, win_lengths=win_lengths
     )
     loss_ref = MultiResolutionSTFTLoss(
         fft_sizes=fft_sizes, hop_sizes=hop_sizes, win_lengths=win_lengths
