@@ -39,7 +39,7 @@ audio_strategy = arrays(
 def test_log_cosh_loss(inputs, target):
     """Sample pytest test function with the pytest fixture as an argument."""
     assert np.allclose(
-        jax.jit(log_cosh_loss)(inputs, target, eps=1e-5),
+        jax.jit(log_cosh_loss, static_argnames=["eps"])(inputs, target, eps=1e-5),
         LogCoshLoss(eps=1e-5)(
             torch.from_numpy(np.transpose(inputs, (0, 2, 1))),
             torch.from_numpy(np.transpose(target, (0, 2, 1))),
@@ -53,7 +53,7 @@ def test_log_cosh_loss(inputs, target):
 def test_esr_loss(inputs, target):
     """Sample pytest test function with the pytest fixture as an argument."""
     assert np.allclose(
-        jax.jit(esr_loss)(inputs, target, eps=1e-5),
+        jax.jit(esr_loss, static_argnames=["eps"])(inputs, target, eps=1e-5),
         ESRLoss(eps=1e-5)(
             torch.from_numpy(np.transpose(inputs, (0, 2, 1))),
             torch.from_numpy(np.transpose(target, (0, 2, 1))),
@@ -67,7 +67,7 @@ def test_esr_loss(inputs, target):
 def test_dc_loss(inputs, target):
     """Sample pytest test function with the pytest fixture as an argument."""
     assert np.allclose(
-        jax.jit(dc_loss)(inputs, target, eps=1e-5),
+        jax.jit(dc_loss, static_argnames=["eps"])(inputs, target, eps=1e-5),
         DCLoss(eps=1e-5)(
             torch.from_numpy(np.transpose(inputs, (0, 2, 1))),
             torch.from_numpy(np.transpose(target, (0, 2, 1))),
