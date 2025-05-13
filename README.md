@@ -28,7 +28,6 @@ pip install fouriax
 
 ```python
 import jax
-import fouriax.stft as stft
 from jax.nn.initializers import lecun_normal
 
 key = jax.random.PRNGKey(0)
@@ -38,14 +37,13 @@ shape = (4, 4098, 1)
 # Initialize the tensor using LeCun normal distribution
 input = lecun_normal()(key1, shape)
 target = lecun_normal()(key2, shape)
-fft_sizes = [1024, 2048, 512]
-hop_sizes = [120, 240, 50]
-win_lengths = [600, 1200, 240]
-params = [
-    stft.init_stft_params(x, y, z)
-    for x, y, z in zip(fft_sizes, hop_sizes, win_lengths)
-]
-loss = multi_resolution_stft_loss(params, input, target)
+
+# Note: size parameters need to be tuples, not lists, in order to ensure
+# that they are hashable and accepted as static parameters by jax.jit
+fft_sizes = (1024, 2048, 512)
+hop_sizes = (120, 240, 50)
+win_lengths = (600, 1200, 240)
+loss = multi_resolution_stft_loss(input, target, fft_sizes, hop_sizes, win_lengths)
 ```
 
 
