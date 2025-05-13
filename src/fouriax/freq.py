@@ -83,7 +83,7 @@ def stft_loss(
     Calculate the STFT loss.
     """
     assert inputs.shape == target.shape
-    assert 0 <= axis < inputs.ndim
+    assert -inputs.ndim <= axis < inputs.ndim
 
     inputs = jnp.reshape(inputs, (-1, inputs.shape[axis]))
     target = jnp.reshape(target, (-1, target.shape[axis]))
