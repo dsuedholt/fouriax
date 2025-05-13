@@ -2,12 +2,10 @@ from functools import partial
 
 import jax
 import jax.numpy as jnp
-import optax
-
-from . import stft
+import scipy
 
 
-def spectral_convergence_loss(x_mag, y_mag):
+def spectral_convergence_loss(x_mag, y_mag, eps=1e-8):
     """
     Calculate the spectral convergence loss.
 
@@ -18,8 +16,8 @@ def spectral_convergence_loss(x_mag, y_mag):
     Returns:
         The spectral convergence loss.
     """
-    numerator = jnp.linalg.norm(y_mag - x_mag, ord=2)
-    denominator = jnp.linalg.norm(y_mag, ord=2)
+    numerator = jnp.linalg.norm(y_mag - x_mag, ord='fro')
+    denominator = jnp.linalg.norm(y_mag, ord='fro') + eps
     loss = numerator / denominator
     return loss
 
@@ -62,10 +60,12 @@ def stft_magnitude_loss(x_mag, y_mag, log=True, distance="L1", reduction="mean")
 
 
 def stft_loss(
-    traced_params,
-    untraced_params,
     inputs,
     target,
+    fft_size: int = 1024,
+    hop_size: int = 256,
+    win_length: int = 1024,
+    window: str | jnp.ndarray = "hann",
     w_sc=1.0,
     w_log_mag=1.0,
     w_lin_mag=0.0,
@@ -76,57 +76,57 @@ def stft_loss(
     output="loss",
     reduction="mean",
     mag_distance="L1",
+    axis=1,
+    undo_window_norm=True,
 ):
     """
     Calculate the STFT loss.
     """
-    bs, _, chs = inputs.shape
+    assert inputs.shape == target.shape
+    assert 0 <= axis < inputs.ndim
 
-    # Compute STFT for inputs and target
-    def _to_map(x):
-        o = stft.stft(traced_params, untraced_params, x)
-        return o
+    inputs = jnp.reshape(inputs, (-1, inputs.shape[axis]))
+    target = jnp.reshape(target, (-1, target.shape[axis]))
 
-    to_map = jax.vmap(_to_map, in_axes=-1, out_axes=-1)
+    if perceptual_weighting is not None:
+        inputs, target = perceptual_weighting(inputs), perceptual_weighting(target)
 
-    def mf(x, y):
-        return (
-            jnp.sqrt(jnp.clip((x**2) + (y**2), a_min=eps)),
-            jax.lax.atan2(y, x),
+    if isinstance(window, str):
+        win = jnp.array(scipy.signal.get_window(window, win_length, fftbins=True))
+
+    def stft(x):
+        noverlap = win_length - hop_size
+        _, _, out = jax.scipy.signal.stft(
+            x, window=win, nperseg=win_length, noverlap=noverlap, nfft=fft_size, axis=axis, boundary='even', padded=False
         )
 
-    inputs_mag, inputs_phs = mf(*to_map(inputs))
-    target_mag, target_phs = mf(*to_map(target))
+        # unlike torch.stft, jax.scipy.signal.stft divides the result by the sum of the window
+        # this can't be disabled through the function signature
+        # so we undo it by default to be consistent with auraloss
+        if undo_window_norm:
+            out *= win.sum()
+
+        return jnp.reshape(out, (-1, out.shape[-1]))
+
+    inputs_stft = stft(inputs)
+    target_stft = stft(target)
+
+    inputs_phs, target_phs = None, None
+    if w_phs:
+        inputs_phs = jnp.angle(inputs_stft)
+        target_phs = jnp.angle(target_stft)
+
+    def mag(x):
+        return jnp.sqrt(jnp.clip((x.real**2) + (x.imag**2), min=eps))
+
+    inputs_mag = mag(inputs_stft)
+    target_mag = mag(target_stft)
 
     # Apply scaling (e.g., Mel, Chroma) if required
     if scale is not None:
         inputs_mag = jnp.matmul(scale, inputs_mag)
         target_mag = jnp.matmul(scale, target_mag)
 
-    # Apply perceptual weighting if required
-    if perceptual_weighting is not None:
-        # since FIRFilter only support mono audio we will move channels to batch dim
-        inputs = jnp.transpose(inputs, (0, 2, 1))
-        target = jnp.transpose(target, (0, 2, 1))
-        inputs = jnp.reshape(inputs, (bs * chs, -1))
-        target = jnp.reshape(target, (bs * chs, -1))
-
-        # now apply the filter to both
-        inputs, target = perceptual_weighting(inputs), perceptual_weighting(target)
-
-        # now move the channels back
-        inputs = jnp.reshape(inputs, (bs, chs, -1))
-        target = jnp.reshape(target, (bs, chs, -1))
-        inputs = jnp.transpose(inputs, (0, 2, 1))
-        target = jnp.transpose(target, (0, 2, 1))
-
-    # Calculate loss components
-    inputs_mag, inputs_phs, target_mag, target_phs = (
-        jnp.ravel(inputs_mag),
-        jnp.ravel(inputs_phs),
-        jnp.ravel(target_mag),
-        jnp.ravel(target_phs),
-    )
     sc_mag_loss = (
         spectral_convergence_loss(inputs_mag, target_mag) * w_sc if w_sc else 0.0
     )
@@ -151,7 +151,7 @@ def stft_loss(
         else 0.0
     )
     phs_loss = (
-        optax.squared_error(inputs_phs, target_phs).mean() * w_phs if w_phs else 0.0
+        ((inputs_phs - target_phs) ** 2).mean() * w_phs if w_phs else 0.0
     )
 
     # Combine loss components
@@ -171,10 +171,12 @@ def stft_loss(
 
 
 def multi_resolution_stft_loss(
-    traced_params,
-    untraced_params,
     inputs,
     target,
+    fft_sizes=(1024, 2048, 512),
+    hop_sizes=(120, 240, 50),
+    win_lengths=(600, 1200, 240),
+    window="hann",
     w_sc=1.0,
     w_log_mag=1.0,
     w_lin_mag=0.0,
@@ -185,6 +187,8 @@ def multi_resolution_stft_loss(
     output="loss",
     reduction="mean",
     mag_distance="L1",
+    axis=1,
+    undo_window_norm=True,
 ):
     mrstft_loss = 0.0
     sc_mag_loss, log_mag_loss, lin_mag_loss, phs_loss = [], [], [], []
@@ -192,6 +196,7 @@ def multi_resolution_stft_loss(
         stft_loss,
         inputs=inputs,
         target=target,
+        window=window,
         w_sc=w_sc,
         w_log_mag=w_log_mag,
         w_lin_mag=w_lin_mag,
@@ -202,20 +207,22 @@ def multi_resolution_stft_loss(
         output=output,
         reduction=reduction,
         mag_distance=mag_distance,
+        axis=axis,
+        undo_window_norm=undo_window_norm,
     )
 
-    for p, q in zip(traced_params, untraced_params):
+    for fs, hs, wl in zip(fft_sizes, hop_sizes, win_lengths):
         if output == "full":
-            tmp_loss = loss_fn(traced_params=p, untraced_params=q)
+            tmp_loss = loss_fn(fft_size=fs, hop_size=hs, win_length=wl)
             mrstft_loss += tmp_loss[0]
             sc_mag_loss.append(tmp_loss[1])
             log_mag_loss.append(tmp_loss[2])
             lin_mag_loss.append(tmp_loss[3])
             phs_loss.append(tmp_loss[4])
         else:
-            mrstft_loss += loss_fn(traced_params=p, untraced_params=q)
+            mrstft_loss += loss_fn(fft_size=fs, hop_size=hs, win_length=wl)
 
-    mrstft_loss /= len(traced_params)
+    mrstft_loss /= len(fft_sizes)
 
     if output == "loss":
         return mrstft_loss
