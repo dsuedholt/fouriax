@@ -6,9 +6,11 @@ import jax
 import numpy as np
 import torch
 import math
-from auraloss.freq import MultiResolutionSTFTLoss, STFTLoss, SumAndDifferenceSTFTLoss
+from auraloss.freq import MultiResolutionSTFTLoss, STFTLoss, SumAndDifferenceSTFTLoss, MelSTFTLoss
 from hypothesis import given, settings
 from hypothesis import strategies as st
+
+import librosa
 
 from fouriax.freq import multi_resolution_stft_loss, stft_loss, sum_and_difference_stft_loss
 
@@ -23,7 +25,6 @@ multi_resolution_stft_loss, stft_loss = jax.jit(
         "w_log_mag",
         "w_lin_mag",
         "w_phs",
-        "scale",
         "perceptual_weighting",
         "eps",
         "output",
@@ -41,7 +42,6 @@ multi_resolution_stft_loss, stft_loss = jax.jit(
         "w_log_mag",
         "w_lin_mag",
         "w_phs",
-        "scale",
         "perceptual_weighting",
         "eps",
         "output",
@@ -128,6 +128,23 @@ def test_multi_resolution_stft_loss(inputs, target):
     )
     assert np.allclose(loss, loss_ref, atol=1.0e-1)
 
+
+@settings(deadline=None, max_examples=10)
+@given(
+    audio_strategy,
+    audio_strategy,
+    st.integers(min_value=10, max_value=12).map(lambda x: 2**x),
+    st.integers(min_value=5, max_value=7).map(lambda x: 2**x),
+)
+def test_mel_scale_stft_loss(inputs, target, res, n_mels):
+    """Sample pytest test function with the pytest fixture as an argument."""
+    mel_fb = librosa.filters.mel(sr=fs, n_fft=res, n_mels=n_mels)
+    loss = stft_loss(inputs, target, res, res // 4, res // 2, scale=mel_fb)
+    loss_ref = MelSTFTLoss(fs, res, res // 4, res // 2, n_mels=n_mels)(
+        torch.from_numpy(np.transpose(inputs, (0, 2, 1))),
+        torch.from_numpy(np.transpose(target, (0, 2, 1))),
+    )
+    assert np.allclose(loss, loss_ref, atol=1.0e-1)
 
 @settings(deadline=None, max_examples=10)
 @given(

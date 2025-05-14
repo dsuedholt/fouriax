@@ -106,7 +106,7 @@ def stft_loss(
         if undo_window_norm:
             out *= win.sum()
 
-        return jnp.reshape(out, (-1, out.shape[-1]))
+        return jnp.reshape(out, (out.shape[-2], -1))
 
     inputs_stft = stft(inputs)
     target_stft = stft(target)
@@ -117,7 +117,7 @@ def stft_loss(
         target_phs = jnp.angle(target_stft)
 
     def mag(x):
-        return jnp.sqrt(jnp.clip((x.real**2) + (x.imag**2), min=eps))
+        return jnp.sqrt(jnp.clip((x.real ** 2) + (x.imag ** 2), min=eps))
 
     inputs_mag = mag(inputs_stft)
     target_mag = mag(target_stft)
