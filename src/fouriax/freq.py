@@ -72,6 +72,7 @@ def stft_loss(
     w_phs=0.0,
     scale=None,
     perceptual_weighting=None,
+    scale_invariance=False,
     eps=1e-8,
     output="loss",
     reduction="mean",
@@ -126,6 +127,10 @@ def stft_loss(
     if scale is not None:
         inputs_mag = jnp.matmul(scale, inputs_mag)
         target_mag = jnp.matmul(scale, target_mag)
+
+    if scale_invariance:
+        alpha = (inputs_mag * target_mag).sum(axis=(-2, -1)) / (target_mag ** 2).sum(axis=(-2, -1))
+        target_mag = target_mag * jnp.expand_dims(alpha, axis=-1)
 
     sc_mag_loss = (
         spectral_convergence_loss(inputs_mag, target_mag) * w_sc if w_sc else 0.0
@@ -183,6 +188,7 @@ def multi_resolution_stft_loss(
     w_phs=0.0,
     scale=None,
     perceptual_weighting=None,
+    scale_invariance=False,
     eps=1e-8,
     output="loss",
     reduction="mean",
@@ -203,6 +209,7 @@ def multi_resolution_stft_loss(
         w_phs=w_phs,
         scale=scale,
         perceptual_weighting=perceptual_weighting,
+        scale_invariance=False,
         eps=eps,
         output=output,
         reduction=reduction,

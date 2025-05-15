@@ -26,6 +26,7 @@ multi_resolution_stft_loss, stft_loss = jax.jit(
         "w_lin_mag",
         "w_phs",
         "perceptual_weighting",
+        "scale_invariance",
         "eps",
         "output",
         "reduction",
@@ -43,6 +44,7 @@ multi_resolution_stft_loss, stft_loss = jax.jit(
         "w_lin_mag",
         "w_phs",
         "perceptual_weighting",
+        "scale_invariance",
         "eps",
         "output",
         "reduction",
@@ -105,6 +107,20 @@ def test_stft_loss(inputs, target, res):
     )
     assert np.allclose(loss, loss_ref, atol=1.0e-1)
 
+
+@settings(deadline=None, max_examples=10)
+@given(
+    audio_strategy,
+    audio_strategy,
+    st.integers(min_value=6, max_value=8).map(lambda x: 2**x),
+)
+def test_scale_invariant_loss(inputs, target, res):
+    loss = stft_loss(inputs, target, res, res // 4, res // 2, scale_invariance=True)
+    loss_ref = STFTLoss(res, res // 4, res // 2, scale_invariance=True)(
+        torch.from_numpy(np.transpose(inputs, (0, 2, 1))),
+        torch.from_numpy(np.transpose(target, (0, 2, 1))),
+    )
+    assert np.allclose(loss, loss_ref, atol=1.0e-1)
 
 @settings(deadline=None, max_examples=10)
 @given(
