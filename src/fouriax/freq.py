@@ -16,15 +16,22 @@ def spectral_convergence_loss(x_mag, y_mag, eps=1e-8):
     Returns:
         The spectral convergence loss.
     """
-    numerator = jnp.linalg.norm(y_mag - x_mag, ord='fro')
-    denominator = jnp.linalg.norm(y_mag, ord='fro') + eps
+    numerator = jnp.linalg.norm(y_mag - x_mag, ord="fro")
+    denominator = jnp.linalg.norm(y_mag, ord="fro") + eps
     loss = numerator / denominator
     return loss
 
 
-def stft_magnitude_loss(x_mag, y_mag, log=True, distance="L1", reduction="mean"):
+def stft_magnitude_loss(
+    x_mag, y_mag, log=True, distance="L1", reduction="mean", log_fac=1.0, log_eps=1e-8
+):
     """
     Calculate the STFT magnitude loss.
+
+    Log-magnitudes are calculated with `log(log_fac*x + log_eps)`, where `log_fac` controls the
+    compression strength (larger value results in more compression), and `log_eps` can be used
+    to control the range of the compressed output values (e.g., `log_eps>=1` ensures positive
+    output values). The default values `log_fac=1` and `log_eps=0` correspond to plain log-compression.
 
     Args:
         x_mag (array): The magnitude spectrum of the first signal.
@@ -32,13 +39,18 @@ def stft_magnitude_loss(x_mag, y_mag, log=True, distance="L1", reduction="mean")
         log (bool): Whether to log-scale the STFT magnitudes.
         distance (str): Distance function ["L1", "L2"].
         reduction (str): Reduction of the loss elements ["mean", "sum", "none"].
-
+        log_eps (float, optional): Constant value added to the magnitudes before evaluating the logarithm.
+            Default: 1e-8
+        log_fac (float, optional): Constant multiplication factor for the magnitudes before evaluating the logarithm.
+            Default: 1.0
     Returns:
         The STFT magnitude loss.
     """
     if log:
-        x_mag = jnp.log(x_mag + 1e-8)  # Adding a small value to avoid log(0)
-        y_mag = jnp.log(y_mag + 1e-8)
+        x_mag = jnp.log(
+            log_fac * x_mag + log_eps
+        )  # Adding a small value to avoid log(0)
+        y_mag = jnp.log(log_fac * y_mag + log_eps)
 
     if distance == "L1":
         # L1 Loss (Mean Absolute Error)
@@ -74,6 +86,8 @@ def stft_loss(
     perceptual_weighting=None,
     scale_invariance=False,
     eps=1e-8,
+    log_eps=1e-8,
+    log_fac=1.0,
     output="loss",
     reduction="mean",
     mag_distance="L1",
@@ -98,7 +112,14 @@ def stft_loss(
     def stft(x):
         noverlap = win_length - hop_size
         _, _, out = jax.scipy.signal.stft(
-            x, window=win, nperseg=win_length, noverlap=noverlap, nfft=fft_size, axis=axis, boundary='even', padded=False
+            x,
+            window=win,
+            nperseg=win_length,
+            noverlap=noverlap,
+            nfft=fft_size,
+            axis=axis,
+            boundary="even",
+            padded=False,
         )
 
         # unlike torch.stft, jax.scipy.signal.stft divides the result by the sum of the window
@@ -118,7 +139,7 @@ def stft_loss(
         target_phs = jnp.angle(target_stft)
 
     def mag(x):
-        return jnp.sqrt(jnp.clip((x.real ** 2) + (x.imag ** 2), min=eps))
+        return jnp.sqrt(jnp.clip((x.real**2) + (x.imag**2), min=eps))
 
     inputs_mag = mag(inputs_stft)
     target_mag = mag(target_stft)
@@ -129,7 +150,9 @@ def stft_loss(
         target_mag = jnp.matmul(scale, target_mag)
 
     if scale_invariance:
-        alpha = (inputs_mag * target_mag).sum(axis=(-2, -1)) / (target_mag ** 2).sum(axis=(-2, -1))
+        alpha = (inputs_mag * target_mag).sum(axis=(-2, -1)) / (target_mag**2).sum(
+            axis=(-2, -1)
+        )
         target_mag = target_mag * jnp.expand_dims(alpha, axis=-1)
 
     sc_mag_loss = (
@@ -137,7 +160,13 @@ def stft_loss(
     )
     log_mag_loss = (
         stft_magnitude_loss(
-            inputs_mag, target_mag, log=True, reduction=reduction, distance=mag_distance
+            inputs_mag,
+            target_mag,
+            log=True,
+            reduction=reduction,
+            distance=mag_distance,
+            log_fac=log_fac,
+            log_eps=log_eps,
         )
         * w_log_mag
         if w_log_mag
@@ -155,9 +184,7 @@ def stft_loss(
         if w_lin_mag
         else 0.0
     )
-    phs_loss = (
-        ((inputs_phs - target_phs) ** 2).mean() * w_phs if w_phs else 0.0
-    )
+    phs_loss = ((inputs_phs - target_phs) ** 2).mean() * w_phs if w_phs else 0.0
 
     # Combine loss components
     total_loss = sc_mag_loss + log_mag_loss + lin_mag_loss + phs_loss
@@ -190,6 +217,8 @@ def multi_resolution_stft_loss(
     perceptual_weighting=None,
     scale_invariance=False,
     eps=1e-8,
+    log_eps=1e-8,
+    log_fac=1.0,
     output="loss",
     reduction="mean",
     mag_distance="L1",
@@ -211,6 +240,8 @@ def multi_resolution_stft_loss(
         perceptual_weighting=perceptual_weighting,
         scale_invariance=False,
         eps=eps,
+        log_eps=log_eps,
+        log_fac=log_fac,
         output=output,
         reduction=reduction,
         mag_distance=mag_distance,
