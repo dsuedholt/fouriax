@@ -117,7 +117,7 @@ def stft_loss(
             nperseg=win_length,
             noverlap=noverlap,
             nfft=fft_size,
-            axis=axis,
+            axis=-1,
             boundary="even",
             padded=False,
         )
@@ -128,7 +128,7 @@ def stft_loss(
         if undo_window_norm:
             out *= win.sum()
 
-        return jnp.reshape(out, (out.shape[-2], -1))
+        return jnp.reshape(out, (out.shape[-1], -1))
 
     inputs_stft = stft(inputs)
     target_stft = stft(target)
